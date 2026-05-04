@@ -1,0 +1,13 @@
+name: Test
+on: workflow_dispatch
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo OK > index.html
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add index.html
+          git commit -m "test" || true
+          git push origin main
