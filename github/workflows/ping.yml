@@ -1,1 +1,199 @@
-. 
+name: Automation Workflow
+on:
+  schedule:
+    - cron: '0 0,6,12,18 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - run: pip install feedparser requests
+    - run: |
+        python3 << 'PYEOF'
+        import os, requests, feedparser, html, json
+        from datetime import datetime
+
+        def safe_get_json(url):
+            try: return requests.get(url, timeout=10).json()
+            except: return {}
+
+        def safe_parse_rss(url, limit=3):
+            items = []
+            try:
+                feed = feedparser.parse(url)
+                for e in feed.entries[:limit]:
+                    title = html.escape(e.get("title", "Нет заголовка"))
+                    link = e.get("link", "#")
+                    pub = e.get("published_parsed")
+                    date_str = datetime(*pub[:6]).strftime("%d.%m") if pub else ""
+                    items.append(f"<li><a href='{link}' target='_blank'>{title}</a>{f'<div class=\"news-meta\">{date_str}</div>' if date_str else ''}</li>")
+            except: items.append("<li>Источник недоступен</li>")
+            return "".join(items)
+
+        now = datetime.now().strftime("%d.%m.%Y %H:%M")
+        currencies = safe_get_json("https://api.exchangerate-api.com/v4/latest/RUB")
+        rates = currencies.get("rates", {})
+        usd = f"{1/rates.get('USD', 1):.2f}" if rates.get('USD') else "--"
+        eur = f"{1/rates.get('EUR', 1):.2f}" if rates.get('EUR') else "--"
+        gbp = f"{1/rates.get('GBP', 1):.2f}" if rates.get('GBP') else "--"
+        chf = f"{1/rates.get('CHF', 1):.2f}" if rates.get('CHF') else "--"
+
+        crypto = safe_get_json("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether,binancecoin,solana&vs_currencies=rub")
+        btc = f"{crypto.get('bitcoin',{}).get('rub','--'):,.0f}" if crypto else "--"
+        eth = f"{crypto.get('ethereum',{}).get('rub','--'):,.0f}" if crypto else "--"
+        usdt = f"{crypto.get('tether',{}).get('rub','--'):,.2f}" if crypto else "--"
+        bnb = f"{crypto.get('binancecoin',{}).get('rub','--'):,.0f}" if crypto else "--"
+        sol = f"{crypto.get('solana',{}).get('rub','--'):,.0f}" if crypto else "--"
+
+        cities = {"Москва": "55.75,37.61", "Санкт-Петербург": "59.93,30.33", "Екатеринбург": "56.83,60.59", "Стокгольм": "59.32,18.06"}
+        weather_html = ""
+        for name, coords in cities.items():
+            lat, lon = coords.split(",")
+            w = safe_get_json(f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,temperature_2m_min,weathercode&timezone=auto&forecast_days=1")
+            d = w.get("daily", {})
+            t_max = d.get("temperature_2m_max", ["--"])[0]
+            t_min = d.get("temperature_2m_min", ["--"])[0]
+            weather_html += f'<div class="data-card"><h3>{name}</h3><div class="value">{t_min}...{t_max}C</div></div>'
+        if not weather_html: weather_html = '<div class="data-card"><div class="value">Данные недоступны</div></div>'
+
+        moon = safe_get_json(f"https://api.farmsense.net/v1/moonphases/?d={now[:10]}")
+        moon_phase = moon[0].get("Phase", "--") if moon and isinstance(moon, list) else "--"
+        moon_illum = moon[0].get("Illumination", "--") if moon and isinstance(moon, list) else "--"
+
+        legal_kremlin = safe_parse_rss("http://kremlin.ru/events/news/feed")
+        legal_gov = safe_parse_rss("http://government.ru/rss/news/")
+        legal_duma = safe_parse_rss("http://duma.gov.ru/rss/news/")
+        legal_council = safe_parse_rss("http://council.gov.ru/services/rss/")
+        legal_minjust = safe_parse_rss("https://minjust.ru/ru/rss/news/")
+        legal_pravo = safe_parse_rss("http://pravo.gov.ru/proxy/ips/?rss&nd=102000001")
+
+        news_fed = safe_parse_rss("https://ria.ru/export/rss2/news/index.xml")
+        news_spb = safe_parse_rss("https://www.fontanka.ru/rss/")
+        news_ekb = safe_parse_rss("https://www.e1.ru/rss/news/")
+        alerts = safe_parse_rss("https://www.e1.ru/rss/news/?q=%D0%A7%D0%A1+%D0%B8%D0%BB%D0%B8+%D0%BF%D0%BE%D0%B6%D0%B0%D1%80", limit=2)
+
+        html_content = f"""<!DOCTYPE html>
+        <html lang="ru">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>EBAL'S</title>
+            <link rel="icon" type="image/png" href="favicon.png">
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+            <style>
+                * {{ margin: 0; padding: 0; box-sizing: border-box; font-family: Arial, sans-serif; }}
+                body {{ background-color: #f0f2f5; line-height: 1.6; }}
+                .container {{ max-width: 1200px; margin: 0 auto; padding: 20px; }}
+                header {{ text-align: center; padding: 50px 0; background-color: #2c3e50; color: white; margin-bottom: 30px; border-radius: 10px; }}
+                .data-section {{ background: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+                .data-section h2 {{ color: #2c3e50; margin-bottom: 20px; border-bottom: 2px solid #2c3e50; padding-bottom: 10px; }}
+                .data-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }}
+                .data-card {{ background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #2c3e50; }}
+                .data-card h3 {{ font-size: 14px; color: #666; margin-bottom: 8px; text-transform: uppercase; }}
+                .data-card .value {{ font-size: 20px; font-weight: bold; color: #2c3e50; }}
+                .news-list {{ list-style: none; }}
+                .news-list li {{ padding: 12px 0; border-bottom: 1px solid #eee; }}
+                .news-list li:last-child {{ border-bottom: none; }}
+                .news-list a {{ color: #2c3e50; text-decoration: none; font-weight: 500; }}
+                .news-list a:hover {{ color: #1a252f; text-decoration: underline; }}
+                .news-meta {{ font-size: 12px; color: #888; margin-top: 4px; }}
+                .moon-phase {{ text-align: center; padding: 20px; }}
+                .moon-icon {{ font-size: 48px; color: #2c3e50; margin-bottom: 10px; }}
+                .update-time {{ text-align: center; color: #888; font-size: 12px; margin-top: 20px; }}
+                .contacts {{ background: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+                .contact-list {{ list-style: none; }}
+                .contact-list li {{ margin: 10px 0; display: flex; align-items: stretch; position: relative; }}
+                .contact-list i {{ font-size: 24px; width: 60px; min-width: 60px; text-align: center; color: #2c3e50; background-color: rgba(44, 62, 80, 0.1); display: flex; align-items: center; justify-content: center; border-radius: 5px 0 0 5px; z-index: 1; }}
+                .contact-btn {{ display: block; width: 100%; padding: 15px; border: 1px solid #ddd; border-left: none; border-radius: 0 5px 5px 0; color: #2c3e50; text-decoration: none; transition: all 0.3s ease; font-weight: 500; background-color: #f8f9fa; margin-left: -1px; position: relative; flex-grow: 1; }}
+                .contact-btn:hover {{ background-color: #2c3e50; color: white; transform: translateY(-2px); box-shadow: 0 2px 5px rgba(0,0,0,0.1); z-index: 2; }}
+                .contact-form {{ background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 30px; }}
+                .form-group {{ margin-bottom: 20px; }}
+                label {{ display: block; margin-bottom: 5px; color: #333; }}
+                input, textarea {{ width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; }}
+                button[type="submit"] {{ width: 100%; background-color: #2c3e50; color: white; padding: 15px; border: none; border-radius: 5px; cursor: pointer; font-size: 18px; transition: all 0.3s ease; }}
+                button[type="submit"]:hover {{ background-color: #1a252f; transform: translateY(-2px); }}
+                .hidden {{ display: none; }}
+                #success-message {{ color: #000080; margin-top: 20px; text-align: center; font-weight: bold; }}
+                @media (max-width: 768px) {{ .container {{ padding: 10px; }} header {{ padding: 30px 0; }} .contact-list i {{ width: 50px; min-width: 50px; font-size: 20px; }} .data-grid {{ grid-template-columns: 1fr; }} }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <header><h1>EBAL'S</h1><p>Expert Business Analytics Legal Solutions</p></header>
+                <section class="data-section"><h2>FINANCIAL DATA</h2>
+                    <div class="data-grid">
+                        <div class="data-card"><h3>USD/RUB</h3><div class="value">{usd}</div></div>
+                        <div class="data-card"><h3>EUR/RUB</h3><div class="value">{eur}</div></div>
+                        <div class="data-card"><h3>GBP/RUB</h3><div class="value">{gbp}</div></div>
+                        <div class="data-card"><h3>CHF/RUB</h3><div class="value">{chf}</div></div>
+                    </div>
+                    <div class="data-grid" style="margin-top: 20px;">
+                        <div class="data-card"><h3>Bitcoin</h3><div class="value">{btc}</div></div>
+                        <div class="data-card"><h3>Ethereum</h3><div class="value">{eth}</div></div>
+                        <div class="data-card"><h3>Tether</h3><div class="value">{usdt}</div></div>
+                        <div class="data-card"><h3>BNB</h3><div class="value">{bnb}</div></div>
+                        <div class="data-card"><h3>Solana</h3><div class="value">{sol}</div></div>
+                    </div>
+                </section>
+                <section class="data-section"><h2>WEATHER FORECAST</h2><div class="data-grid">{weather_html}</div></section>
+                <section class="data-section"><h2>MOON PHASE</h2>
+                    <div class="moon-phase"><i class="fas fa-moon moon-icon"></i><div class="value">{moon_phase}</div><div style="color: #666; margin-top: 8px;">Освещенность: {moon_illum}</div></div>
+                </section>
+                <section class="data-section"><h2>ПРАВОВАЯ ИНФОРМАЦИЯ</h2>
+                    <div class="data-grid">
+                        <div class="data-card"><h3>Кремль.ру</h3><ul class="news-list">{legal_kremlin}</ul></div>
+                        <div class="data-card"><h3>Правительство РФ</h3><ul class="news-list">{legal_gov}</ul></div>
+                        <div class="data-card"><h3>Госдума</h3><ul class="news-list">{legal_duma}</ul></div>
+                        <div class="data-card"><h3>Совет Федерации</h3><ul class="news-list">{legal_council}</ul></div>
+                        <div class="data-card"><h3>Минюст РФ</h3><ul class="news-list">{legal_minjust}</ul></div>
+                        <div class="data-card"><h3>Pravo.gov.ru</h3><ul class="news-list">{legal_pravo}</ul></div>
+                    </div>
+                </section>
+                <section class="data-section"><h2>НОВОСТИ: ФЕДЕРАЛЬНЫЕ</h2><ul class="news-list">{news_fed}</ul></section>
+                <section class="data-section"><h2>НОВОСТИ: САНКТ-ПЕТЕРБУРГ</h2><ul class="news-list">{news_spb}</ul></section>
+                <section class="data-section"><h2>НОВОСТИ: ЕКАТЕРИНБУРГ</h2><ul class="news-list">{news_ekb}</ul></section>
+                <section class="data-section"><h2>ЧРЕЗВЫЧАЙНЫЕ ПРОИСШЕСТВИЯ</h2><ul class="news-list">{alerts}</ul></section>
+                <div class="update-time">Последнее обновление: {now}</div>
+                <section class="contacts"><h2>CONTACTS</h2>
+                    <ul class="contact-list">
+                        <li><i class="fas fa-envelope"></i><a href="mailto:ebals@ebals.slmail.me" class="contact-btn">Email</a></li>
+                        <li><i class="fab fa-telegram"></i><a href="https://t.me/EBAL_S" target="_blank" class="contact-btn">Telegram</a></li>
+                    </ul>
+                </section>
+                <section class="contact-form"><h2>CONTACT EBAL'S</h2>
+                    <form id="myForm" action="https://formspree.io/f/mwplpkrv" method="POST">
+                        <div class="form-group"><label for="name">Name:</label><input type="text" id="name" name="name" required></div>
+                        <div class="form-group"><label for="email">Email:</label><input type="email" id="email" name="email" required></div>
+                        <div class="form-group"><label for="message">Message:</label><textarea id="message" name="message" rows="5" required></textarea></div>
+                        <button type="submit">Submit</button>
+                    </form>
+                    <div id="success-message" class="hidden">The message has been successfully sent!<br></div>
+                </section>
+            </div>
+            <script>
+                document.getElementById('myForm').addEventListener('submit', function(e) {{
+                    e.preventDefault(); const form = e.target; const formData = new FormData(form); const successMessage = document.getElementById('success-message');
+                    fetch(form.action, {{ method: 'POST', body: formData, headers: {{ 'Accept': 'application/json' }} }})
+                    .then(response => {{ if (response.ok) {{ successMessage.classList.remove('hidden'); form.reset(); setTimeout(() => {{ successMessage.classList.add('hidden'); }}, 3000); }} else {{ alert('Ошибка отправки'); }} }})
+                    .catch(error => {{ console.error('Error:', error); alert('Ошибка отправки'); }});
+                }});
+            </script>
+        </body>
+        </html>"""
+
+        with open("index.html", "w", encoding="utf-8") as f:
+            f.write(html_content)
+        PYEOF
+    - name: Push to main
+      run: |
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        git add index.html
+        git commit -m "Auto update site data [skip ci]" || echo "No changes"
+        git push origin main
