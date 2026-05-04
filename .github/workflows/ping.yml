@@ -1,0 +1,17 @@
+name: ForcePush
+on: workflow_dispatch
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: main
+    - run: |
+        echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Test</title></head><body><h1>WORKS</h1></body></html>' > index.html
+        git config user.name github-actions
+        git config user.email github-actions@github.com
+        git add -f index.html
+        git commit -m "update" || true
+        git push https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main --force
+        git push https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:master --force 2>/dev/null || true
